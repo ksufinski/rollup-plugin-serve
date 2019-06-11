@@ -1,12 +1,14 @@
 import { readFile } from 'fs'
 import { createServer as createHttpsServer } from 'https'
-import { createServer } from 'http'
+import http, {createServer } from 'http'
 import { resolve } from 'path'
 
 import mime from 'mime'
 import opener from 'opener'
+import url from 'url'
 
 let server
+const URL = url.URL
 
 /**
  * Serve your rolled up bundle like webpack-dev-server
@@ -31,6 +33,49 @@ function serve (options = { contentBase: '' }) {
     Object.keys(options.headers).forEach((key) => {
       response.setHeader(key, options.headers[key])
     })
+
+    const reqUrl = url.parse(`http://${request.url}`)
+    const onSuccess = (content) => {
+      response.writeHead(200, { 'Content-Type': 'application/json' })
+      response.end(content)
+    }
+
+    const onError = (content) => {
+      response.writeHead(503, { 'Content-Type': 'application/json' })
+      response.end()
+    }
+    const matchedPath = Object
+      .keys(options.proxy)
+      .find(key => reqUrl.pathname.includes(key))
+
+    if (!!matchedPath) {
+      const target = options.proxy[matchedPath].target
+      const url = new URL(target + reqUrl.pathname)
+
+      const req = http.request({
+        host: url.hostname,
+        port: url.port,
+        path: request.url,
+        method: request.method,
+        headers: options.headers
+      }, (r) => {
+
+        r.on('data', data => {
+          // const response = JSON.parse(data.toString());
+          response.status && response.status === 'Failed' ? onError(response) : onSuccess(data)
+
+        })
+        r.on('error', error => {
+          console.log('error', error)
+        })
+      })
+      req.on('error', (error) => {
+        console.error(error)
+      })
+      req.end()
+
+      return
+    }
 
     readFileFromContentBase(options.contentBase, urlPath, function (error, content, filePath) {
       if (!error) {
